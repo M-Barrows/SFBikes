@@ -1,0 +1,189 @@
+---
+title: "Safe Pedals"
+author: Michael Barrows
+output: 
+  html_notebook:
+    toc: true
+    toc_float: true
+    theme: journal
+---
+
+## Introduction
+
+### Statement of Purpose 
+
+As populations steadily rise, citizens in bustling urban centers like San Francisco face increased difficulty regarding safe and efficient travel. Cars can be relatively efficient (higher speed) and relatively safe but often fall victim to variable traffic patters. Conversely, walking is much safer but also much slower than driving in a car. In this light, many people are turning to bicycles as their preferred mode of transportation as they offer increased route flexibility over cars and increased travel speed when compared to walking. The Ford Go-Bikes in San Francisco offer citizens an affordable and flexible way to make this transition. 
+  
+Unfortunately, cities harbor more transportation perrils than simply busy streets. These may include poor road conditions, bike scarcity, dangerous weather conditions, and more. In this report, crime events were tracked alongside bike trips in an attempt to identify areas and bike stations within San Francisco that might be more dangerous than others. With this knowledge, users of the Go-Bikes  will be able to identify the safest route route through the city. 
+
+In addition to comparing the spacial distribution of bike routes and crime events to benefit bikers, the distribution of permitted food trucks will also be observed to benefit food truck owners as well as bikers. The purpose of this comparison is two-fold. First, it will allow food truck owners to more strategically plan their truck placement to drum up business. Second, it can aid regular users of Go-Bikes in optimizing their route to pass by their favorite food truck on their way from point A to point B. 
+
+In concert with each other, these three datasets will greatly increase the trip quality of Go-Bike users as well as bolster local business.
+
+### Planned Analyses
+
+In order to acheive the propositions above, several techniques will be employed. 
+
+* Descriptive Statistics to gain basic insight
+* Interactive geospatial mapping for data visualization
+* Historical trend analysis and forecasting
+* _Others_
+  
+## Set-up {.tabset .tabset-fade}
+
+### Load Required Packages
+
+Before we begin working with any data, we need to install some key packages that will make future tasks easier. These packages are:
+
+| Package     | Function                    |
+|------------:|:---------------------------:|
+| data.table  | reading data from the web   |
+| lubridate   | converting strings to dates |
+| dplyr       | data manipulation           |
+| knitr       | compile RMarkdown into HTML |
+| leaflet     | interactive geospatial maps
+
+
+The following code chunk checks your personal environment for the necessary packages, installs them if they don't exist, and then loads all of them into the environment for use.
+
+```{r install and load required packages, message = F, warning = F}
+rm(list = ls())
+
+#Install necessary packages only if they aren't already installed
+list.of.packages <- c("data.table","lubridate","dplyr","knitr","leaflet")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if (length(new.packages)) install.packages(new.packages)
+
+#load the required packages
+require(data.table)
+require(lubridate)
+require(dplyr)
+require(knitr)
+
+require(leaflet)
+```
+
+### Import Raw Data
+
+We will be utilizing three datasets for our analysis: 
+
+1. [Bay Area Bike Share](https://www.fordgobike.com/system-data)
+
+2. [SF Police Incidents](https://data.sfgov.org/Public-Safety/-Change-Notice-Police-Department-Incidents/tmnf-yvry)
+
+3. [Food Truck Locations](https://data.sfgov.org/Economy-and-Community/Mobile-Food-Schedule/jjew-r69b)
+
+All three of these datasets are open and available as of writing of this document. We will read these datasets in and save them to their own variables in the code below. Next, the datasets will be cleaned and reformatted to better suite our needs.
+
+```{r load all data, message = F, warning = F,results=F}
+bikes <- fread("https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv", data.table = F)
+crime <- fread("https://data.sfgov.org/api/views/tmnf-yvry/rows.csv", data.table = F)
+truck <- fread("https://data.sfgov.org/api/views/jjew-r69b/rows.csv", data.table = F)
+```
+
+## Data Reformat
+
+After gathering our data, there is quite a bit of reformatting that needs to happen before we can perform any computation or other analyses. Much of this reformatting is attribute recalassification from strings to something more appropriate (int, date, etc.).
+
+### Bikes 
+
+```{r glimpse bike data}
+as_tibble(bikes)
+```
+
+```{r reformat bike attributes}
+# reformat duration_sec and member_birth_year to integer
+bikes$duration_sec <- as.integer(bikes$duration_sec)
+bikes$member_birth_year <- as.integer(bikes$member_birth_year)
+# reformat start and end time to date
+bikes$start_time <- ymd_hms(bikes$start_time)
+bikes$end_time <- ymd_hms(bikes$end_time)
+# reformat station latitude and longitude values to double
+bikes$start_station_latitude <- as.double(bikes$start_station_latitude)
+bikes$start_station_longitude <- as.double(bikes$start_station_longitude)
+bikes$end_station_latitude <- as.double(bikes$end_station_latitude)
+bikes$end_station_longitude <- as.double(bikes$end_station_longitude)
+# reformat user_type and member_gender as factors
+bikes$user_type <- as.factor(bikes$user_type)
+bikes$member_gender <- as.factor(bikes$member_gender)
+
+as_tibble(bikes)
+```
+
+
+### Crime
+```{r glimps crime data}
+as_tibble(crime)
+```
+
+```{r reformat crime attributes}
+# Reformat Category as a factor
+crime$Category <- as.factor(crime$Category)
+# Combine Date and Time columns
+crime <- crime %>% unite(Date_Time,Date,Time,sep = " ",remove = F)
+# Reformat Date, Time, and Date_Time appropriately
+crime$Date <- mdy(crime$Date)
+crime$Time <- hm(crime$Time)
+crime$Date_Time <- mdy_hm(crime$Date_Time)
+# rename X and Y to Longitude and Latitude respectively
+names(crime)[which(names(crime) == "X")] <- "Longitude"
+names(crime)[which(names(crime) == "Y")] <- "Latitude"
+
+as_tibble(crime)
+```
+
+
+### Food Trucks
+```{r glimpse truck data}
+as_tibble(truck)
+```
+
+```{r reformat truck attributes}
+# Reformat ColdTruck as factor
+truck$ColdTruck <- as.factor(truck$ColdTruck)
+
+# Reformat Addr_Date_Create and Addr_date_Modified as Date
+truck$Addr_Date_Create <- mdy_hms(truck$Addr_Date_Create)
+truck$Addr_Date_Modified <- mdy_hms(truck$Addr_Date_Modified)
+
+# Reformat start24 and end24 as time
+truck$start24 <- hm(truck$start24)
+truck$end24 <- hm(truck$end24)
+
+as_tibble(truck)
+```
+
+## Pruning
+
+### Columns
+```{r prune columns}
+crime <- crime %>% select(-c(DayOfWeek, Address))
+truck <- truck %>% select(-c(DayOrder,DayOfWeekStr,starttime,endtime,optionaltext,Applicant))
+```
+
+### Rows
+```{r prune rows}
+latest_start <- max(c(min(bikes$start_time, na.rm = T),min(crime$Date_Time, na.rm = T),min(truck$Addr_Date_Create, na.rm = T)))
+earliest_end <- min(c(max(bikes$end_time, na.rm = T),max(crime$Date_Time, na.rm = T),max(truck$Addr_Date_Modified,na.rm = T)))
+bikes <- bikes %>% filter(start_time >= latest_start & end_time <= earliest_end)
+crime <- crime %>% filter(Date_Time >= latest_start & Date_Time <= earliest_end)
+truck <- truck %>% filter(Addr_Date_Create >= latest_start & Addr_Date_Modified <= earliest_end)
+#all observations now in the same date range for increased robustness
+```
+
+## Codebooks {.tabset .tabset-fade}
+
+### Bikes
+
+### Crime
+
+### Trucks
+
+## Exploration
+
+### Bikes
+
+
+### Crime
+
+### Trucks
