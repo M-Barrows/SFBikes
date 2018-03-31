@@ -29,7 +29,7 @@ In order to acheive the propositions above, several techniques will be employed.
 * Historical trend analysis and forecasting
 * _Others_
   
-## Set-up {.tabset .tabset-fade}
+## Set-up
 
 ### Load Required Packages
 
@@ -47,6 +47,7 @@ Before we begin working with any data, we need to install some key packages that
 The following code chunk checks your personal environment for the necessary packages, installs them if they don't exist, and then loads all of them into the environment for use.
 
 ```{r install and load required packages, message = F, warning = F}
+#Remove all objects in Environment for a clean start
 rm(list = ls())
 
 #Install necessary packages only if they aren't already installed
@@ -67,13 +68,13 @@ require(leaflet)
 
 We will be utilizing three datasets for our analysis: 
 
-1. [Bay Area Bike Share](https://www.fordgobike.com/system-data)
+1. [Bay Area Bike Share](https://www.fordgobike.com/system-data): Each row contains information about a bike trip
 
-2. [SF Police Incidents](https://data.sfgov.org/Public-Safety/-Change-Notice-Police-Department-Incidents/tmnf-yvry)
+2. [SF Police Incidents](https://data.sfgov.org/Public-Safety/-Change-Notice-Police-Department-Incidents/tmnf-yvry): Each row contains information about a crime incident
 
-3. [Food Truck Locations](https://data.sfgov.org/Economy-and-Community/Mobile-Food-Schedule/jjew-r69b)
+3. [Food Truck Locations](https://data.sfgov.org/Economy-and-Community/Mobile-Food-Schedule/jjew-r69b): Each row contains information about one food truck at a particular time.
 
-All three of these datasets are open and available as of writing of this document. We will read these datasets in and save them to their own variables in the code below. Next, the datasets will be cleaned and reformatted to better suite our needs.
+All three of these datasets are open and available as of writing of this document. Each dataset was downloaded and stored to their own variables using the code below. In the next step, the data were cleaned and reformatted. After which a full codebook is provided for each dataset.
 
 ```{r load all data, message = F, warning = F,results=F}
 bikes <- fread("https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv", data.table = F)
@@ -81,62 +82,73 @@ crime <- fread("https://data.sfgov.org/api/views/tmnf-yvry/rows.csv", data.table
 truck <- fread("https://data.sfgov.org/api/views/jjew-r69b/rows.csv", data.table = F)
 ```
 
-## Data Reformat
+### Reformat
 
 After gathering our data, there is quite a bit of reformatting that needs to happen before we can perform any computation or other analyses. Much of this reformatting is attribute recalassification from strings to something more appropriate (int, date, etc.).
 
-### Bikes 
+#### Bikes 
 
+Upon initial download, the `bikes` data is in the format below: 
 ```{r glimpse bike data}
-as_tibble(bikes)
+glimpse(bikes)
 ```
+
+While the data are tidy, in that each row represents a single trip observation, many attributes need to be reformatted to be consistent with the data they hold. For example, the time attributes need to be converted from `character` values to `date-time` values. Similarly, the latitude and longitude values were converted from `string` to `double`.  The `*_id` attributes were left as strings to avoid improperly using them as integers and performing math calculations on them. The code below will reformat 10 of the `r length(names(bikes))` attributes.
 
 ```{r reformat bike attributes}
 # reformat duration_sec and member_birth_year to integer
 bikes$duration_sec <- as.integer(bikes$duration_sec)
 bikes$member_birth_year <- as.integer(bikes$member_birth_year)
+
 # reformat start and end time to date
 bikes$start_time <- ymd_hms(bikes$start_time)
 bikes$end_time <- ymd_hms(bikes$end_time)
+
 # reformat station latitude and longitude values to double
 bikes$start_station_latitude <- as.double(bikes$start_station_latitude)
 bikes$start_station_longitude <- as.double(bikes$start_station_longitude)
 bikes$end_station_latitude <- as.double(bikes$end_station_latitude)
 bikes$end_station_longitude <- as.double(bikes$end_station_longitude)
+
 # reformat user_type and member_gender as factors
 bikes$user_type <- as.factor(bikes$user_type)
 bikes$member_gender <- as.factor(bikes$member_gender)
-
-as_tibble(bikes)
 ```
 
 
-### Crime
+#### Crime
+
+The `crime` data as compiled from the source is as follows:  
 ```{r glimps crime data}
-as_tibble(crime)
+glimpse(crime)
 ```
+
+Like the `bike` data, date-time attributes within the `crime` dataset need to be converted from a `character` format. Additionally, the column names `X` and `Y` are converted to `Longitude` and `Latitude` respectively for readibility. Like the `id` values in the `bike` data, the `IncidntNum` values were converted to characters to avoid accidental math calculations. Lastly, the `Category` attribute was converted to a `factor` type.
 
 ```{r reformat crime attributes}
 # Reformat Category as a factor
 crime$Category <- as.factor(crime$Category)
-# Combine Date and Time columns
-crime <- crime %>% unite(Date_Time,Date,Time,sep = " ",remove = F)
-# Reformat Date, Time, and Date_Time appropriately
-crime$Date <- mdy(crime$Date)
-crime$Time <- hm(crime$Time)
+# Combine Date and Time columns, remove the originals
+crime <- crime %>% unite(Date_Time,Date,Time,sep = " ",remove = T)
+# Reformat Date_Time appropriately
 crime$Date_Time <- mdy_hm(crime$Date_Time)
 # rename X and Y to Longitude and Latitude respectively
 names(crime)[which(names(crime) == "X")] <- "Longitude"
 names(crime)[which(names(crime) == "Y")] <- "Latitude"
+# format incident number as character
+crime$IncidntNum <- as.character(crime$IncidntNum)
 
-as_tibble(crime)
 ```
 
 
-### Food Trucks
+#### Food Trucks
+
+The last dataset that is used in this analysis is the `truck` dataset. In it's raw form, it is organized as follows: 
 ```{r glimpse truck data}
-as_tibble(truck)
+glimpse(truck)
 ```
+
+Like the previous two datasets, we reformat the `truck` data so that the data formats are representative of values they hold. 
 
 ```{r reformat truck attributes}
 # Reformat ColdTruck as factor
@@ -149,40 +161,174 @@ truck$Addr_Date_Modified <- mdy_hms(truck$Addr_Date_Modified)
 # Reformat start24 and end24 as time
 truck$start24 <- hm(truck$start24)
 truck$end24 <- hm(truck$end24)
-
-as_tibble(truck)
 ```
 
-## Pruning
 
-### Columns
+### Pruning
+
+While the age of big-data has arrived, it is often preferable to trim a dataset down to its smallest usefull form. In the following two sections the datasets were trimmed down in both demensions (rows and columns) to make them as simple as possible while still providing useful insight. 
+
+#### Columns
+
+Many attributes in these datasets might have been helpful for clerical referrence or when converting values like day of the week from a number to words. However, for our use case, they are unecessary. The following variables were removed: 
+
+**Crime**
+
+* `DayofWeek`
+* `Address`
+* `PdDistrict`
+* `PdId`
+* `Location`
+
+**Truck**
+
+* `starttime`
+* `endtime`
+* `PermitLocation`
+* `locationdesc`
+* `optionaltext`
+* `locationid`
+* `scheduleid`
+* `scheduleid`
+* `CNN`
+* `block`
+* `lot`
+* `ColdTruck`
+* `Applicant`
+
 ```{r prune columns}
-crime <- crime %>% select(-c(DayOfWeek, Address))
-truck <- truck %>% select(-c(DayOrder,DayOfWeekStr,starttime,endtime,optionaltext,Applicant))
+# remove three attributes from crime dataset
+crime <- crime %>% select(-c(DayOfWeek, Address,PdDistrict, PdId, Location))
+
+# select columns to keep from truck dataset
+truck <- truck %>% select(c(permit, Latitude, Longitude, DayOrder, DayOfWeekStr, start24, end24, Addr_Date_Create, Addr_Date_Modified))
 ```
 
-### Rows
+#### Rows
+
+In order to make useful comparisons across datasets, each observation needed to be made within a common date range. To determine this date range, we found the latest starting date and the earliest ending date from all three datasets. Then, we applied a filter to each dataset to only include observations between those two dates.
+
 ```{r prune rows}
+# Find the latest starting date
 latest_start <- max(c(min(bikes$start_time, na.rm = T),min(crime$Date_Time, na.rm = T),min(truck$Addr_Date_Create, na.rm = T)))
+# Find the earliest ending date
 earliest_end <- min(c(max(bikes$end_time, na.rm = T),max(crime$Date_Time, na.rm = T),max(truck$Addr_Date_Modified,na.rm = T)))
+# Filter all datasets to the same date range
 bikes <- bikes %>% filter(start_time >= latest_start & end_time <= earliest_end)
 crime <- crime %>% filter(Date_Time >= latest_start & Date_Time <= earliest_end)
 truck <- truck %>% filter(Addr_Date_Create >= latest_start & Addr_Date_Modified <= earliest_end)
-#all observations now in the same date range for increased robustness
+# All observations now in the same date range for increased robustness
 ```
 
 ## Codebooks {.tabset .tabset-fade}
 
+The "Codebooks" are concise descriptions of each dataset collected after it has been cleaned from the preceeding steps. They include a download link to the original source file, a short description of the data as well as a list of attributes (their name, type and a description), and an explorable version of the data. All null/missing values (in both the original and cleaned data) have been represented as "NA". 
+
 ### Bikes
+
+**Source**: [Download from Ford Go-Bikes](https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv)
+
+**Description**: This dataset includes data on bike trips made on Ford Go-Bikes around the city of San Francisco from `r min(bikes$start_time)` to `r max(bikes$end_time)`. It contains `r nrow(bikes)` observations and `r ncol(bikes)` attributes.
+
+**Attributes**
+
+|Attribute            |Format                |Description|
+|---------------------|----------------------|-----------|
+|`r names(bikes)[1]`  |`r class(bikes[,1])`  | Total time of trip (s)|
+|`r names(bikes)[2]`  |`r class(bikes[,2])`  | Starting time of trip (YMD HMS)|
+|`r names(bikes)[3]`  |`r class(bikes[,3])`  | Ending time of trip (YMD HMS)|
+|`r names(bikes)[4]`  |`r class(bikes[,4])`  | Starting station number|
+|`r names(bikes)[5]`  |`r class(bikes[,5])`  | Starting station name|
+|`r names(bikes)[6]`  |`r class(bikes[,6])`  | Starting station latitude|
+|`r names(bikes)[7]`  |`r class(bikes[,7])`  | Starting station longitude|
+|`r names(bikes)[8]`  |`r class(bikes[,8])`  | Ending station number|
+|`r names(bikes)[9]`  |`r class(bikes[,9])`  | Ending station name|
+|`r names(bikes)[10]` |`r class(bikes[,10])` | Ending station latitude|
+|`r names(bikes)[11]` |`r class(bikes[,11])` | Ending station longitude|
+|`r names(bikes)[12]` |`r class(bikes[,12])` | Bike number|
+|`r names(bikes)[13]` |`r class(bikes[,13])` | User Type ("Customer" or "Subscriber")|
+|`r names(bikes)[14]` |`r class(bikes[,14])` | Birth year of Subscriber |
+|`r names(bikes)[15]` |`r class(bikes[,15])` | Gender of Subscriber ("Male" or "Female")|
+
+**Dataset**:
+
+```{r}
+as_tibble(bikes)
+```
+
 
 ### Crime
 
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/tmnf-yvry/rows.csv?accessType=DOWNLOAD)
+
+**Description**: This dataset includes information about crime incidents in the San Francisco area from `r min(crime$Date_Time)` to `r max(crime$Date_Time)`. It contains `r nrow(crime)` observations and `r ncol(crime)`.
+
+**Attributes**:
+
+|Attribute          |Format               |Description|
+|-------------------|---------------------|-----------|
+|`r names(crime)[1]`|`r class(crime[,1])` | Unique incident number |
+|`r names(crime)[2]`|`r class(crime[,2])` | Type of incident (`r nrow(distinct(crime,Category))` unique values) |
+|`r names(crime)[3]`|`r class(crime[,3])` | Longer incident description |
+|`r names(crime)[4]`|`r class(crime[,4])` | Date and time of incident (YMD HMS) |
+|`r names(crime)[5]`|`r class(crime[,5])` | Incident resolution (if any) |
+|`r names(crime)[6]`|`r class(crime[,6])` | Incident longitude |
+|`r names(crime)[7]`|`r class(crime[,7])` | Incident latitude |
+
+**Dataset**:
+
+```{r}
+as_tibble(crime)
+```
+
+
 ### Trucks
+
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/jjew-r69b/rows.csv?accessType=DOWNLOAD)
+
+**Description**: This dataset includes information about food truck locations and schedules around the San Francisco area with permit approvals from `r min(truck$Addr_Date_Create)` to `r max(truck$Addr_Date_Create)`. It has `r nrow(truck)` observations and `r ncol(truck)` attributes. 
+
+**Attributes**: 
+
+|Attribute            |Format                |Description|
+|---------------------|----------------------|-----------|
+|`r names(truck)[1]`  |`r class(truck[,1])`  | Permit number |
+|`r names(truck)[2]`  |`r class(truck[,2])`  | Latitude of permit location|
+|`r names(truck)[3]`  |`r class(truck[,3])`  | Longitude of permit location|
+|`r names(truck)[4]`  |`r class(truck[,4])`  | Day of week as integer (1=Monday : 7=Sunday)|
+|`r names(truck)[5]`  |`r class(truck[,5])`  | Day of week in word format|
+|`r names(truck)[6]`  |`r class(truck[,6])`  | Start time of food truck schedule in 24-hour time |
+|`r names(truck)[7]`  |`r class(truck[,7])`  | End time of food truck schedule in 24-hour time|
+|`r names(truck)[8]`  |`r class(truck[,8])`  | Date permit was created|
+|`r names(truck)[9]`  |`r class(truck[,9])`  | Date permit was updated|
+
+**Dataset**: 
+
+```{r}
+as_tibble(truck)
+```
+
 
 ## Exploration
 
-### Bikes
+```{r}
+mean_ride_all <- round(mean(bikes$duration_sec, na.rm = T)/60,0)
+mean_ride_members <- round(mean(filter(bikes, user_type == "Subscriber")$duration_sec, na.rm = T)/60,0)
+mean_ride_customers <- round(mean(filter(bikes, user_type == "Customer")$duration_sec, na.rm = T)/60,0)
+perc_male <- round(sum(bikes$member_gender == "Male")/sum(bikes$member_gender == "Male" | bikes$member_gender == "Female")*100,2)
+perc_female <- round(sum(bikes$member_gender == "Female")/sum(bikes$member_gender == "Male" | bikes$member_gender == "Female")*100,2)
+```
 
+
+|Metric | Value |
+|-------|-------|
+|Average Ride Duration (All)[minutes]| `r mean_ride_all`|
+|Average Ride Duration (Members)[minutes] | `r mean_ride_members`|
+|Average Ride Duration (Non-Members)[minutes] | `r mean_ride_customers`|
+|Percent Members (Male) | `r perc_male`%|
+|Percent Members (Female) | `r perc_female`%| 
+
+### Bikes
 
 ### Crime
 
