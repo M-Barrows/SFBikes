@@ -34,19 +34,7 @@ In order to achieve the propositions above, several techniques will be employed.
 
 ### Load Required Packages
 
-Before we begin working with any data, we need to install some key packages that will make future tasks easier. These packages are:
 
-| Package     | Function                    |
-|------------:|:---------------------------:|
-| data.table  | reading data from the web   |
-| lubridate   | converting strings to dates |
-| tidyr       | easy data format cleaning   |
-| dplyr       | data manipulation           |
-| DT          | writing data tables to HTML |
-| knitr       | compile RMarkdown into HTML |
-| ggplot2     | powerful plotting function  |
-| plotly      | create interactive figures  |
-| leaflet     | interactive geospatial maps |
 
 
 The following code chunk checks your personal environment for the necessary packages, installs them if they don't exist, and then loads all of them into the environment for use.
@@ -56,20 +44,24 @@ The following code chunk checks your personal environment for the necessary pack
 rm(list = ls())
 
 #Install necessary packages only if they aren't already installed
-list.of.packages <- c("data.table","lubridate","tidyr","dplyr","DT","knitr","ggplot2","plotly","leaflet")
+list.of.packages <- c("data.table","lubridate","tidyr","dplyr","stringr","DT","knitr","ggplot2","ggmap","plotly","leaflet")
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
-invisible(if (length(new.packages)) install.packages(new.packages))
+if (length(new.packages)) install.packages(new.packages)
 
 #load the required packages
-invisible(require(data.table))
-invisible(require(lubridate))
-invisible(require(tidyr))
-invisible(require(dplyr))
-invisible(require(DT))
-invisible(require(knitr))
-invisible(require(ggplot2))
-invisible(require(plotly))
-invisible(require(leaflet))
+require(data.table)
+require(lubridate)
+require(tidyr)
+require(dplyr)
+require(stringr)
+require(DT)
+require(knitr)
+require(ggplot2)
+require(ggmap)
+require(leaflet)
+#not yet implemented
+require(plotly)
+
 ```
 
 ### Import Raw Data
@@ -80,14 +72,14 @@ We will be utilizing three datasets for our analysis:
 
 2. [SF Police Incidents](https://data.sfgov.org/Public-Safety/-Change-Notice-Police-Department-Incidents/tmnf-yvry): Each row contains information about a crime incident
 
-3. [Food Truck Locations](https://data.sfgov.org/Economy-and-Community/Mobile-Food-Schedule/jjew-r69b): Each row contains information about one food truck at a particular time.
+3. [Road conditions](https://data.sfgov.org/City-Infrastructure/DPW-Street-Sidewalk-Evaluation-Results-7-1-2013-to/83ki-hu3p): Each row contains information about an evaluation event.
 
 All three of these datasets are open and available as of writing of this document. Each dataset was downloaded and stored to their own variables using the code below. In the next step, the data were cleaned and reformatted. After which a full codebook is provided for each dataset.
 
 ```{r load all data, message = F, warning = F,results=F}
 bikes <- fread("https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
 crime <- fread("https://data.sfgov.org/api/views/tmnf-yvry/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
-truck <- fread("https://data.sfgov.org/api/views/jjew-r69b/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+road <- fread("https://data.sfgov.org/api/views/83ki-hu3p/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
 ```
 
 ### Reformat
@@ -104,23 +96,20 @@ glimpse(bikes)
 While the data are tidy, in that each row represents a single trip observation, many attributes need to be reformatted to be consistent with the data they hold. For example, the time attributes need to be converted from `character` values to `date-time` values. Similarly, the latitude and longitude values were converted from `string` to `double`.  The `*_id` attributes were left as strings to avoid improperly using them as integers and performing math calculations on them. The code below will reformat 10 of the `r length(names(bikes))` attributes.
 
 ```{r reformat bike attributes}
-# reformat duration_sec and member_birth_year to integer
-bikes$duration_sec <- as.integer(bikes$duration_sec)
-bikes$member_birth_year <- as.integer(bikes$member_birth_year)
 
-# reformat start and end time to date
-bikes$start_time <- ymd_hms(bikes$start_time)
-bikes$end_time <- ymd_hms(bikes$end_time)
-
-# reformat station latitude and longitude values to double
-bikes$start_station_latitude <- as.double(bikes$start_station_latitude)
-bikes$start_station_longitude <- as.double(bikes$start_station_longitude)
-bikes$end_station_latitude <- as.double(bikes$end_station_latitude)
-bikes$end_station_longitude <- as.double(bikes$end_station_longitude)
-
-# reformat user_type and member_gender as factors
-bikes$user_type <- as.factor(bikes$user_type)
-bikes$member_gender <- as.factor(bikes$member_gender)
+bikes <- bikes	%>%	
+  mutate(	
+    duration_sec	=	as.integer(duration_sec),		
+    member_birth_year	=	as.integer(member_birth_year),		
+    start_time	=	ymd_hms(start_time),		
+    end_time	=	ymd_hms(end_time),		
+    start_station_latitude	=	as.double(start_station_latitude),		
+    start_station_longitude	=	as.double(start_station_longitude),		
+    end_station_latitude	=	as.double(end_station_latitude),		
+    end_station_longitude	=	as.double(end_station_longitude),		
+    user_type	=	as.factor(user_type),		
+    member_gender	=	as.factor(member_gender)
+  )
 ```
 
 #### Crime
@@ -133,41 +122,39 @@ glimpse(crime)
 Like the `bike` data, date-time attributes within the `crime` dataset need to be converted from a `character` format. Additionally, the column names `X` and `Y` are converted to `Longitude` and `Latitude` respectively for readability. Like the `id` values in the `bike` data, the `IncidntNum` values were converted to characters to avoid accidental math calculations. Lastly, the `Category` attribute was converted to a `factor` type.
 
 ```{r reformat crime attributes}
-# Reformat Category as a factor
-crime$Category <- as.factor(crime$Category)
-# Combine Date and Time columns, remove the originals
-crime <- crime %>% unite(Date_Time,Date,Time,sep = " ",remove = T)
-# Reformat Date_Time appropriately
-crime$Date_Time <- mdy_hm(crime$Date_Time)
-# rename X and Y to Longitude and Latitude respectively
-names(crime)[which(names(crime) == "X")] <- "Longitude"
-names(crime)[which(names(crime) == "Y")] <- "Latitude"
-# format incident number as character
-crime$IncidntNum <- as.character(crime$IncidntNum)
-
+crime <- crime %>%
+  unite(Date_Time,Date,Time,sep = " ",remove = T) %>%
+  mutate(
+    Category = as.factor(Category),
+    Date_Time = mdy_hm(Date_Time),
+    IncidntNum = as.character(IncidntNum),
+    Longitude = X,
+    Latitude = Y
+  )
 ```
 
 
-#### Food Trucks
+#### Road
 
-The last dataset that is used in this analysis is the `truck` dataset. In it's raw form, it is organized as follows: 
-```{r glimpse truck data}
-glimpse(truck)
+The last dataset that is used in this analysis is the `road` dataset. In it's raw form, it is organized as follows: 
+```{r glimpse road data}
+glimpse(road)
 ```
 
-Like the previous two datasets, we reformat the `truck` data so that the data formats are representative of values they hold. 
+Like the previous two datasets, we reformat the `road` data so that the data formats are representative of values they hold. Fortunately, most of the attributes are already formatted correctly and only a few need to be addressed. 
 
-```{r reformat truck attributes}
-# Reformat ColdTruck as factor
-truck$ColdTruck <- as.factor(truck$ColdTruck)
+```{r reformat road data}
 
-# Reformat Addr_Date_Create and Addr_date_Modified as Date
-truck$Addr_Date_Create <- mdy_hms(truck$Addr_Date_Create)
-truck$Addr_Date_Modified <- mdy_hms(truck$Addr_Date_Modified)
+road <- road %>%
+  mutate(
+    FY = as.factor(FY),
+    Priority = as.factor(Priority),
+    Location = str_remove_all(Location, "\\("),
+    Location = str_remove_all(Location, "\\)"),
+    eval_date = dmy_hms(`Evaluation date`)
+  ) %>%
+  separate(Location,into = c("Lat", "Lon"),sep = ", ")
 
-# Reformat start24 and end24 as time
-truck$start24 <- hm(truck$start24)
-truck$end24 <- hm(truck$end24)
 ```
 
 
@@ -187,28 +174,14 @@ Many attributes in these datasets might have been helpful for clerical reference
 * `PdId`
 * `Location`
 
-**Truck**
-
-* `starttime`
-* `endtime`
-* `PermitLocation`
-* `locationdesc`
-* `optionaltext`
-* `locationid`
-* `scheduleid`
-* `scheduleid`
-* `CNN`
-* `block`
-* `lot`
-* `ColdTruck`
-* `Applicant`
 
 ```{r prune columns}
 # remove three attributes from crime dataset
-crime <- crime %>% select(-c(DayOfWeek, Address,PdDistrict, PdId, Location))
+crime <- crime %>% 
+  select(-c(DayOfWeek, Address,PdDistrict, PdId, Location))
+road <- road %>% 
+  select(c(4,7,29,36,41:52,54:57,60:63))
 
-# select columns to keep from truck dataset
-truck <- truck %>% select(c(permit, Latitude, Longitude, DayOrder, DayOfWeekStr, start24, end24, Addr_Date_Create, Addr_Date_Modified))
 ```
 
 #### Rows
@@ -217,13 +190,18 @@ In order to make useful comparisons across datasets, each observation needed to 
 
 ```{r prune rows}
 # Find the latest starting date
-latest_start <- max(c(min(bikes$start_time, na.rm = T),min(crime$Date_Time, na.rm = T),min(truck$Addr_Date_Create, na.rm = T)))
+latest_start <- max(c(min(bikes$start_time, na.rm = T),
+                      min(crime$Date_Time, na.rm = T)))
 # Find the earliest ending date
-earliest_end <- min(c(max(bikes$end_time, na.rm = T),max(crime$Date_Time, na.rm = T),max(truck$Addr_Date_Modified,na.rm = T)))
+earliest_end <- min(c(max(bikes$end_time, na.rm = T),
+                      max(crime$Date_Time, na.rm = T)))
 # Filter all datasets to the same date range
-bikes <- bikes %>% filter(start_time >= latest_start & end_time <= earliest_end)
-crime <- crime %>% filter(Date_Time >= latest_start & Date_Time <= earliest_end)
-truck <- truck %>% filter(Addr_Date_Create >= latest_start & Addr_Date_Modified <= earliest_end)
+bikes <- bikes %>% 
+  filter(start_time >= latest_start & end_time <= earliest_end)
+crime <- crime %>% 
+  filter(Date_Time >= latest_start & Date_Time <= earliest_end)
+road <- road %>% 
+  filter(FY == c("2016-17", "2017-18"))
 # All observations now in the same date range for increased robustness
 ```
 
@@ -289,30 +267,45 @@ as_tibble(crime)
 ```
 
 
-### Trucks
+### Road
 
-**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/jjew-r69b/rows.csv?accessType=DOWNLOAD)
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/83ki-hu3p/rows.csv?accessType=DOWNLOAD)
 
-**Description**: This dataset includes information about food truck locations and schedules around the San Francisco area with permit approvals from `r min(truck$Addr_Date_Create)` to `r max(truck$Addr_Date_Create)`. It has `r nrow(truck)` observations and `r ncol(truck)` attributes. 
+**Description**: This dataset includes information about street and sidewalk quality around the San Francisco area during the `r paste(levels(road$FY),sep = ", ")` fiscal years. It has `r nrow(road)` observations and `r ncol(road)` attributes. 
 
 **Attributes**: 
 
 |Attribute            |Format                |Description|
 |---------------------|----------------------|-----------|
-|`r names(truck)[1]`  |`r class(truck[,1])`  | Permit number |
-|`r names(truck)[2]`  |`r class(truck[,2])`  | Latitude of permit location|
-|`r names(truck)[3]`  |`r class(truck[,3])`  | Longitude of permit location|
-|`r names(truck)[4]`  |`r class(truck[,4])`  | Day of week as integer (1=Monday : 7=Sunday)|
-|`r names(truck)[5]`  |`r class(truck[,5])`  | Day of week in word format|
-|`r names(truck)[6]`  |`r class(truck[,6])`  | Start time of food truck schedule in 24-hour time |
-|`r names(truck)[7]`  |`r class(truck[,7])`  | End time of food truck schedule in 24-hour time|
-|`r names(truck)[8]`  |`r class(truck[,8])`  | Date permit was created|
-|`r names(truck)[9]`  |`r class(truck[,9])`  | Date permit was updated|
+|`r names(road)[1]`  |`r class(road[,1])`  | Fiscal year of evaluation |
+|`r names(road)[2]`  |`r class(road[,2])`  | Category of road/sidewalk being evaluated |
+|`r names(road)[3]`  |`r class(road[,3])`  | Number of trash recepticals in area |
+|`r names(road)[4]`  |`r class(road[,4])`  | Number of trees in area |
+|`r names(road)[5]`  |`r class(road[,5])`  | Score Pass (0 = no, 1 = yes) |
+|`r names(road)[6]`  |`r class(road[,6])`  | Litter Pass (0 = no, 1 = yes) |
+|`r names(road)[7]`  |`r class(road[,7])`  | Grime, Leaks, Spills Pass (0 = no, 1 = yes) |
+|`r names(road)[8]`  |`r class(road[,8])`  | Public (DPW) Pass (0 = no, 1 = yes) |
+|`r names(road)[9]`  |`r class(road[,9])`  | Public (nonDPW) |
+|`r names(road)[10]`  |`r class(road[,10])`  | Private Pass (0 = no, 1 = yes) |
+|`r names(road)[11]`  |`r class(road[,11])`  | Sidewalk |
+|`r names(road)[12]`  |`r class(road[,12])`  | Fullness Pass (0 = no, 1 = yes) |
+|`r names(road)[13]`  |`r class(road[,13])`  | Cleanliness of trash receptacles Pass (0 = no, 1 = yes) |
+|`r names(road)[14]`  |`r class(road[,14])`  | Cleanliness around trash receptacles Pass (0 = no, 1 = yes) |
+|`r names(road)[15]`  |`r class(road[,15])`  | Painting Pass (0 = No, 1 = Yes) |
+|`r names(road)[16]`  |`r class(road[,16])`  | Structural integrity & function pass (0 = No, 1 = Yes) |
+|`r names(road)[17]`  |`r class(road[,17])`  | Cleanliness|
+|`r names(road)[18]`  |`r class(road[,18])`  | Tree Appearance|
+|`r names(road)[20]`  |`r class(road[,20])`  | Clearance|
+|`r names(road)[21]`  |`r class(road[,21])`  | Latitude of evaluation site|
+|`r names(road)[22]`  |`r class(road[,22])`  | Longitude of evaluation site|
+|`r names(road)[23]`  |`r class(road[,24])`  | Priority level ("Priority" and "Regular")|
+|`r names(road)[24]`  |`r class(road[,24])`  | Date of evaluation|
+
 
 **Dataset**: 
 
-```{r view truck data, message = F, warning = F}
-as_tibble(truck)
+```{r view road data, message = F, warning = F}
+as_tibble(road)
 ```
 
 
@@ -322,62 +315,45 @@ Much of the goal of this project is to provide a platform for self discovery of 
 
 ### Bikes
 
-We first start by calculating some basic ridership statistics from the bike dataset. The code for doing so is shown below with a summary table below that. 
-
-```{r calculate specific values in bike data}
-# Find average ride length in minutes for All riders, Members, and non-members
-mean_ride_all <- round(mean(bikes$duration_sec, na.rm = T)/60,0)
-
-mean_ride_members <- round(mean(filter(bikes, user_type == "Subscriber")$duration_sec, na.rm = T)/60,0)
-mean_ride_customers <- round(mean(filter(bikes, user_type == "Customer")$duration_sec, na.rm = T)/60,0)
-
-# Determine the Male:Female split of members
-bikes_member <- filter(bikes,!is.na(member_gender))
-perc_male <- round(sum(bikes_member$member_gender == "Male")/sum(bikes_member$member_gender == "Male" | bikes_member$member_gender == "Female")*100,2)
-perc_female <- round(sum(bikes_member$member_gender == "Female")/sum(bikes_member$member_gender == "Male" | bikes_member$member_gender == "Female")*100,2)
-
-# Determine Popular Stations
-popular_start <- unique(bikes$start_station_name)[which.max(tabulate(match(bikes$start_station_name, unique(bikes$start_station_name))))]
-popular_end <- unique(bikes$end_station_name)[which.max(tabulate(match(bikes$end_station_name, unique(bikes$end_station_name))))]
+```{r Station locations groupings}
+bikes %>%
+  group_by(start_station_name) %>%
+  summarise(lat = mean(start_station_latitude,na.rm = T),
+            long = mean(start_station_longitude, na.rm = T)) %>%
+  mutate(cluster = ifelse(long < -122.3,1,
+                        ifelse(long > -122.3 & long < -122,2,3))) %>%
+  ggplot(aes(long,lat, col = factor(cluster))) + 
+  geom_point(alpha = 0.3) + 
+  scale_color_brewer(palette = "Set2")
+  coord_map() +
+  theme_classic() 
 ```
 
+```{r common routes}
+(top_routes <- (bikes %>%
+  mutate(route = paste(start_station_name, end_station_name, sep = " ~ ")) %>%
+  group_by(route, start_station_latitude, start_station_longitude, 
+           end_station_latitude, end_station_longitude) %>%
+  tally() %>%
+  rename(start_lat = start_station_latitude,
+         start_lon = start_station_longitude,
+         end_lat = end_station_latitude,
+         end_lon = end_station_longitude,
+         obs = n) %>%
+  arrange(desc(obs)))[1:1000,])
 
-|Metric                                   | Value                                    |
-|----------------------------------------:|:----------------------------------------:|
-|Average Ride Duration (All)[minutes]| `r mean_ride_all` |
-|Average Ride Duration (Members)[minutes] | `r mean_ride_members` |
-|Average Ride Duration (Non-Members)[minutes] | `r mean_ride_customers` |
-|Percent Members (Male) | `r perc_male`% |
-|Percent Members (Female) | `r perc_female`% |
-|Most popular start station | `r popular_start` |
-|Most popular destination station |`r popular_end` |
-
-With some of the notable statistics determined, the next step was to create some basic plots. The first of which was a simple scatter plot of ride duration against date.
-
-```{r plot ride length over time}
-ggplot(bikes, aes(x = start_time, y = duration_sec/60)) + 
-  geom_point(aes(color = user_type)) +
-  labs(title = "Ride length over time for customers and subscribers",
-       x = "Date",
-       y = "Ride duration (minutes)")
+  ggmap(get_map(location = "San Francisco",
+                source = "google", 
+                maptype = "roadmap", 
+                color = "bw")) +
+    scale_x_continuous(limits = c(-122.5, -121.8), expand = c(0,0)) +
+    scale_y_continuous(limits = c(37.3,37.9), expand = c(0,0)) +
+    geom_segment(data = top_routes, aes(x = start_lon,
+                      y = start_lat,
+                      xend = end_lon,
+                      yend = end_lat)) 
 ```
 
-When viewing this figure, it is worth noting that the number of minutes in a day is 1,440. Based on the figure, it appears that the rides end after 24 hours whether the bike has been returned or not. This will potentially lead to data inconsistencies. The figure also makes it easy to see that a large number of trips are less than 500 minutes (8.3hrs). We further confirm that with the following figure.
-```{r plot distribution of ride length, warning = F}
-ggplot(bikes, aes(duration_sec/60)) + 
-  geom_density() + 
-  labs(title = "Distribution curve of ride duration",
-       x = "Ride duration (minutes)")
-```
-
-If we restrict the x axis of the previous figure a little, we can see that the largest amount of riders actually rides for less than 40 minutes.
-```{r trimmed ride length distribution plot, warning = F, message = F}
-ggplot(bikes, aes(duration_sec / 60)) + 
-  geom_density() +
-  labs(title = "Distribution curve of ride duration",
-       x = "Ride duration (minutes)") +
-  scale_x_continuous(limits = c(0,60))
-```
 
 ### Crime
 
@@ -404,18 +380,17 @@ leaflet(data = crime %>% filter(Date_Time >= "2017-10-01" & Date_Time < "2017-11
   addMarkers(clusterOptions = markerClusterOptions(), label = ~Category, lat = ~Latitude, lng = ~Longitude)
 ```
 
-### Trucks
+### Road
 
-Below is a map of all food truck permit locations. 
-```{r map truck permit locations, message = F, warning = F}
-leaflet(data = truck) %>%
-          addProviderTiles(providers$MtbMap) %>% 
-          addProviderTiles(providers$Stamen.TonerLines,
-                           options = providerTileOptions(opacity = 0.35)) %>%
-          addProviderTiles(providers$Stamen.TonerLabels) %>%
-          addMarkers(clusterOptions = markerClusterOptions(), label = ~permit, lat = ~Latitude, lng = ~Longitude)
+```{r}
+ ggmap(get_map(location = "San Francisco",
+                source = "google", 
+                maptype = "roadmap", 
+                color = "bw")) +
+    scale_x_continuous(limits = c(-122.5, -121.8), expand = c(0,0)) +
+    scale_y_continuous(limits = c(37.3,37.9), expand = c(0,0)) + 
+  geom_point(data = road, aes(as.double(Lon), as.double(Lat)))
 ```
-
 
 ## Future Plans
 

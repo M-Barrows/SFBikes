@@ -1,0 +1,81 @@
+---
+title: "Safe Pedals"
+author: "San Francisco Bike Share Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    source_code: embed
+    theme: journal
+---
+```{r install and load required packages, message = FALSE, warning = FALSE}
+#Remove all objects in Environment for a clean start
+rm(list = ls())
+
+#Install necessary packages only if they aren't already installed
+list.of.packages <- c("data.table","flexdashboard","lubridate","tidyr","dplyr","stringr","DT","knitr","ggplot2","ggmap","plotly","leaflet")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if (length(new.packages)) install.packages(new.packages)
+
+#load the required packages
+require(data.table)
+require(flexdashboard)
+require(lubridate)
+require(tidyr)
+require(dplyr)
+require(stringr)
+require(DT)
+require(knitr)
+require(ggplot2)
+require(ggmap)
+require(leaflet)
+#not yet implemented
+require(plotly)
+
+```
+
+Home {.storyboard}
+===================================== 
+
+
+```{r}
+leaflet(options = leafletOptions(minZoom = 10, maxZoom = 18)) %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addTiles() %>%
+  setView(lat = 37.7749, lng = -122.4194, zoom = 13)
+
+```
+
+***
+As populations steadily rise, citizens in bustling urban centers like San Francisco face increased difficulty regarding safe and efficient travel. Cars can be relatively efficient (higher speed) and relatively safe but often fall victim to variable traffic patters. Conversely, walking is much safer but also much slower than driving in a car. In this light, many people are turning to bicycles as their preferred mode of transportation as they offer increased route flexibility over cars and increased travel speed when compared to walking. The Ford Go-Bikes in San Francisco offer citizens an affordable and flexible way to make this transition. 
+  
+Unfortunately, cities harbor more transportation perils than simply busy streets. These may include poor road conditions, bike scarcity, dangerous weather conditions, and more. In this report, crime events, and road conditions were tracked along with bike trips in an attempt to identify areas and bike stations within San Francisco that might be more dangerous than others. With this knowledge, users of the Go-Bikes  will be able to identify the safer routes through the city. 
+
+
+Setup and Raw Data
+=========================================
+
+Row 
+-----------------------------------------
+
+### Packages
+
+| Package     | Function                    |
+|------------:|:---------------------------:|
+| data.table  | reading data from the web   |
+| lubridate   | converting strings to dates |
+| tidyr       | easy data format cleaning   |
+| dplyr       | data manipulation           |
+| DT          | writing data tables to HTML |
+| knitr       | compile RMarkdown into HTML |
+| ggplot2     | powerful plotting function  |
+| ggmap       | Mapping locations from GPS coordinates |
+| plotly      | create interactive figures  |
+| leaflet     | interactive geospatial maps |
+
+### Bikes Data
+
+Row 
+-----------------------------------------
+
+### Street Data
+
+### Crime Data
