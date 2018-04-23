@@ -3,7 +3,8 @@ title: "Safe Pedals"
 author: "San Francisco Bike Share Analysis"
 output: 
   flexdashboard::flex_dashboard:
-    source_code: embed
+    source_code: https://github.com/MBarrows20/BANA8090Project
+    social: menu
     theme: journal
 ---
 
@@ -363,7 +364,7 @@ bikes_SF %>%
 
 ### Which routes are most popular?
 
-```{r common routes}
+```{r common routes, cache=T}
 top_routes <- (bikes_SF %>%
   mutate(route = paste(start_station_name, end_station_name, sep = " ~ ")) %>%
   group_by(route, start_station_latitude, start_station_longitude, 
@@ -413,7 +414,7 @@ Input {.sidebar}
 
 **Top Left** 
 
-This figure shows that `Mixed Use` streets have almost double the number of trees as any other category of street.A street with more trees is going to have more shade and therefore provide a more plesent ride in the hot summer months. 
+This figure shows that Mixed Use streets have almost double the number of trees as any other category of street.A street with more trees is going to have more shade and therefore provide a more plesent ride in the hot summer months. 
 
 **Bottom Left** 
 
@@ -501,6 +502,10 @@ for(i in 1:3){
 } 
 ```
 
+Inputs {.sidebar}
+-----------------------------------------
+
+The bottom right figure again shows where the bike stations are located. The other three figures highlight where the three most prevaltent crimes take place. A comparisson of these four figures leads you to discover that Market Street and the 16th Street Mission are fairly dangerous places to ride a Go-Bike.
 
 Column
 -----------------------------------------
