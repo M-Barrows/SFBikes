@@ -340,7 +340,7 @@ endpoint <- function(dist,bear,val="x",x=0,y=0){
 ```
 
 
-```{r cache=T}
+```{r}
 bikes_SF %>%
   na.omit() %>%
   mutate(
@@ -404,16 +404,7 @@ ggplot(aes(user_type, fill = member_gender)) +
   scale_fill_manual(values = c("firebrick2","dodgerblue1","purple"))
 ```
 
-### Average Ride Length
 
-```{r}
-bikes_SF %>%
-  filter(!is.na(duration_sec))%>%
-  group_by(start_time, user_type) %>%
-  summarise(avg_dur = mean(duration_sec,na.rm=T))
-ggplot(aes(day, avg_dur, col = user_type)) +
-  geom_point()
-```
 Street Condition
 =========================================
 
