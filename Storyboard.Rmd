@@ -363,7 +363,7 @@ bikes_SF %>%
 
 ### Which routes are most popular?
 
-```{r common routes}
+```{r common routes,eval=FALSE}
 top_routes <- (bikes_SF %>%
   mutate(route = paste(start_station_name, end_station_name, sep = " ~ ")) %>%
   group_by(route, start_station_latitude, start_station_longitude, 
@@ -375,16 +375,16 @@ top_routes <- (bikes_SF %>%
          end_lon = end_station_longitude,
          obs = n) %>%
   arrange(desc(obs)))[1:500,]
-
-  ggmap(get_map(location = "San Francisco",
-                source = "google", 
-                maptype = "roadmap", 
-                color = "bw",zoom = 14)) +
-    geom_segment(data = top_routes, aes(x = start_lon,
-                      y = start_lat,
-                      xend = end_lon,
-                      yend = end_lat), alpha = 0.3, 
-                 col = "blue")
+# 
+#   ggmap(get_map(location = "San Francisco",
+#                 source = "osm", 
+#                 maptype = "roadmap", 
+#                 color = "bw",zoom = 14)) +
+#     geom_segment(data = top_routes, aes(x = start_lon,
+#                       y = start_lat,
+#                       xend = end_lon,
+#                       yend = end_lat), alpha = 0.3, 
+#                  col = "blue")
 ```
 
 
@@ -398,7 +398,8 @@ Inputs {.sidebar}
 
 ```{r}
 bikes_SF %>%
-  filter(!is.na(member_gender))%>%
+  filter(!is.na(member_gender),
+         member_gender != '')%>%
 ggplot(aes(user_type, fill = member_gender)) +
   geom_histogram(stat = "count") +
   scale_fill_manual(values = c("firebrick2","dodgerblue1","purple"))
