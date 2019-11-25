@@ -1,0 +1,432 @@
+---
+title: "Project Proposal"
+author: "Michael Barrows"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    theme: journal
+    toc: yes
+    toc_float: yes
+---
+
+## Introduction
+
+### Statement of Purpose 
+
+As populations steadily rise, citizens in bustling urban centers like San Francisco face increased difficulty regarding safe and efficient travel. Cars can be relatively efficient (higher speed) and relatively safe but often fall victim to variable traffic patters. Conversely, walking is much safer but also much slower than driving in a car. In this light, many people are turning to bicycles as their preferred mode of transportation as they offer increased route flexibility over cars and increased travel speed when compared to walking. The Ford Go-Bikes in San Francisco offer citizens an affordable and flexible way to make this transition. 
+  
+Unfortunately, cities harbor more transportation perils than simply busy streets. These may include poor road conditions, bike scarcity, dangerous weather conditions, and more. In this report, crime events were tracked alongside bike trips in an attempt to identify areas and bike stations within San Francisco that might be more dangerous than others. With this knowledge, users of the Go-Bikes  will be able to identify the safest route route through the city. 
+
+In addition to comparing the spacial distribution of bike routes and crime events to benefit bikers, the distribution of permitted food trucks will also be observed to benefit food truck owners as well as bikers. The purpose of this comparison is two-fold. First, it will allow food truck owners to more strategically plan their truck placement to drum up business. Second, it can aid regular users of Go-Bikes in optimizing their route to pass by their favorite food truck on their way from point A to point B. 
+
+In concert with each other, these three datasets will greatly increase the trip quality of Go-Bike users as well as bolster local business.
+
+### Planned Analyses
+
+In order to achieve the propositions above, several techniques will be employed. 
+
+* Descriptive statistics to gain basic insight
+* Interactive geospatial mapping for data visualization
+* Historical trend analysis and forecasting
+* _Others_
+  
+## Set-up
+
+### Load Required Packages
+
+
+
+
+The following code chunk checks your personal environment for the necessary packages, installs them if they don't exist, and then loads all of them into the environment for use.
+
+```{r install and load required packages, message = FALSE, warning = FALSE}
+#Remove all objects in Environment for a clean start
+rm(list = ls())
+
+#Install necessary packages only if they aren't already installed
+list.of.packages <- c("data.table","lubridate","tidyr","dplyr","stringr","DT","knitr","ggplot2","ggmap","plotly","leaflet")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if (length(new.packages)) install.packages(new.packages)
+
+#load the required packages
+require(data.table)
+require(lubridate)
+require(tidyr)
+require(dplyr)
+require(stringr)
+require(DT)
+require(knitr)
+require(ggplot2)
+require(ggmap)
+require(leaflet)
+#not yet implemented
+require(plotly)
+
+```
+
+### Import Raw Data
+
+We will be utilizing three datasets for our analysis: 
+
+1. [Bay Area Bike Share](https://www.fordgobike.com/system-data): Each row contains information about a bike trip
+
+2. [SF Police Incidents](https://data.sfgov.org/Public-Safety/-Change-Notice-Police-Department-Incidents/tmnf-yvry): Each row contains information about a crime incident
+
+3. [Road conditions](https://data.sfgov.org/City-Infrastructure/DPW-Street-Sidewalk-Evaluation-Results-7-1-2013-to/83ki-hu3p): Each row contains information about an evaluation event.
+
+All three of these datasets are open and available as of writing of this document. Each dataset was downloaded and stored to their own variables using the code below. In the next step, the data were cleaned and reformatted. After which a full codebook is provided for each dataset.
+
+```{r load all data, message = F, warning = F,results=F}
+bikes <- fread("https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+crime <- fread("https://data.sfgov.org/api/views/tmnf-yvry/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+road <- fread("https://data.sfgov.org/api/views/83ki-hu3p/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+```
+
+### Reformat
+
+After gathering our data, there is quite a bit of reformatting that needs to happen before we can perform any computation or other analyses. Much of this reformatting is attribute reclassification from strings to something more appropriate (int, date, etc.).
+
+#### Bikes 
+
+Upon initial download, the `bikes` data is in the format below: 
+```{r glimpse bike data}
+glimpse(bikes)
+```
+
+While the data are tidy, in that each row represents a single trip observation, many attributes need to be reformatted to be consistent with the data they hold. For example, the time attributes need to be converted from `character` values to `date-time` values. Similarly, the latitude and longitude values were converted from `string` to `double`.  The `*_id` attributes were left as strings to avoid improperly using them as integers and performing math calculations on them. The code below will reformat 10 of the `r length(names(bikes))` attributes.
+
+```{r reformat bike attributes}
+
+bikes <- bikes	%>%	
+  mutate(	
+    duration_sec	=	as.integer(duration_sec),		
+    member_birth_year	=	as.integer(member_birth_year),		
+    start_time	=	ymd_hms(start_time),		
+    end_time	=	ymd_hms(end_time),		
+    start_station_latitude	=	as.double(start_station_latitude),		
+    start_station_longitude	=	as.double(start_station_longitude),		
+    end_station_latitude	=	as.double(end_station_latitude),		
+    end_station_longitude	=	as.double(end_station_longitude),		
+    user_type	=	as.factor(user_type),		
+    member_gender	=	as.factor(member_gender)
+  )
+```
+
+#### Crime
+
+The `crime` data as compiled from the source is as follows:  
+```{r glimps crime data}
+glimpse(crime)
+```
+
+Like the `bike` data, date-time attributes within the `crime` dataset need to be converted from a `character` format. Additionally, the column names `X` and `Y` are converted to `Longitude` and `Latitude` respectively for readability. Like the `id` values in the `bike` data, the `IncidntNum` values were converted to characters to avoid accidental math calculations. Lastly, the `Category` attribute was converted to a `factor` type.
+
+```{r reformat crime attributes}
+crime <- crime %>%
+  unite(Date_Time,Date,Time,sep = " ",remove = T) %>%
+  mutate(
+    Category = as.factor(Category),
+    Date_Time = mdy_hm(Date_Time),
+    IncidntNum = as.character(IncidntNum),
+    Longitude = X,
+    Latitude = Y
+  )
+```
+
+
+#### Road
+
+The last dataset that is used in this analysis is the `road` dataset. In it's raw form, it is organized as follows: 
+```{r glimpse road data}
+glimpse(road)
+```
+
+Like the previous two datasets, we reformat the `road` data so that the data formats are representative of values they hold. Fortunately, most of the attributes are already formatted correctly and only a few need to be addressed. 
+
+```{r reformat road data}
+
+road <- road %>%
+  mutate(
+    FY = as.factor(FY),
+    Priority = as.factor(Priority),
+    Location = str_remove_all(Location, "\\("),
+    Location = str_remove_all(Location, "\\)"),
+    eval_date = dmy_hms(`Evaluation date`)
+  ) %>%
+  separate(Location,into = c("Lat", "Lon"),sep = ", ")
+
+```
+
+
+### Pruning
+
+While the age of big-data has arrived, it is often preferable to trim a dataset down to its smallest useful form. In the following two sections the datasets were trimmed down in both dimensions (rows and columns) to make them as simple as possible while still providing useful insight. 
+
+#### Columns
+
+Many attributes in these datasets might have been helpful for clerical reference or when converting values like day of the week from a number to words. However, for our use case, they are unnecessary. The following variables were removed: 
+
+**Crime**
+
+* `DayofWeek`
+* `Address`
+* `PdDistrict`
+* `PdId`
+* `Location`
+
+
+```{r prune columns}
+# remove three attributes from crime dataset
+crime <- crime %>% 
+  select(-c(DayOfWeek, Address,PdDistrict, PdId, Location))
+road <- road %>% 
+  select(c(4,7,29,36,41:52,54:57,60:63))
+
+```
+
+#### Rows
+
+In order to make useful comparisons across datasets, each observation needed to be made within a common date range. To determine this date range, we found the latest starting date and the earliest ending date from all three datasets. Then, we applied a filter to each dataset to only include observations between those two dates.
+
+```{r prune rows}
+# Find the latest starting date
+latest_start <- max(c(min(bikes$start_time, na.rm = T),
+                      min(crime$Date_Time, na.rm = T)))
+# Find the earliest ending date
+earliest_end <- min(c(max(bikes$end_time, na.rm = T),
+                      max(crime$Date_Time, na.rm = T)))
+# Filter all datasets to the same date range
+bikes <- bikes %>% 
+  filter(start_time >= latest_start & end_time <= earliest_end)
+crime <- crime %>% 
+  filter(Date_Time >= latest_start & Date_Time <= earliest_end)
+road <- road %>% 
+  filter(FY == c("2016-17", "2017-18"))
+# All observations now in the same date range for increased robustness
+```
+
+## Codebooks {.tabset .tabset-fade}
+
+The "Codebooks" are concise descriptions of each dataset collected after it has been cleaned from the preceding steps. They include a download link to the original source file, a short description of the data as well as a list of attributes (their name, type and a description), and an exploitable version of the data. All null/missing values (in both the original and cleaned data) have been represented as "NA". The only attributes that contain NA values are the `member_birth_year` and `member_gender` attributes in the bike data. This happens for every "Customer" entry as they only track this information for members.
+
+### Bikes
+
+**Source**: [Download from Ford Go-Bikes](https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv)
+
+**Description**: This dataset includes data on bike trips made on Ford Go-Bikes around the city of San Francisco from `r min(bikes$start_time)` to `r max(bikes$end_time)`. It contains `r nrow(bikes)` observations and `r ncol(bikes)` attributes.
+
+**Attributes**
+
+|Attribute            |Format                |Description|
+|---------------------|----------------------|-----------|
+|`r names(bikes)[1]`  |`r class(bikes[,1])`  | Total time of trip (s)|
+|`r names(bikes)[2]`  |`r class(bikes[,2])`  | Starting time of trip (YMD HMS)|
+|`r names(bikes)[3]`  |`r class(bikes[,3])`  | Ending time of trip (YMD HMS)|
+|`r names(bikes)[4]`  |`r class(bikes[,4])`  | Starting station number|
+|`r names(bikes)[5]`  |`r class(bikes[,5])`  | Starting station name|
+|`r names(bikes)[6]`  |`r class(bikes[,6])`  | Starting station latitude|
+|`r names(bikes)[7]`  |`r class(bikes[,7])`  | Starting station longitude|
+|`r names(bikes)[8]`  |`r class(bikes[,8])`  | Ending station number|
+|`r names(bikes)[9]`  |`r class(bikes[,9])`  | Ending station name|
+|`r names(bikes)[10]` |`r class(bikes[,10])` | Ending station latitude|
+|`r names(bikes)[11]` |`r class(bikes[,11])` | Ending station longitude|
+|`r names(bikes)[12]` |`r class(bikes[,12])` | Bike number|
+|`r names(bikes)[13]` |`r class(bikes[,13])` | User Type ("Customer" or "Subscriber")|
+|`r names(bikes)[14]` |`r class(bikes[,14])` | Birth year of Subscriber |
+|`r names(bikes)[15]` |`r class(bikes[,15])` | Gender of Subscriber ("Male" or "Female")|
+
+**Dataset**:
+
+```{r view bike data, message = F, warning = F}
+as_tibble(bikes)
+```
+
+
+### Crime
+
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/tmnf-yvry/rows.csv?accessType=DOWNLOAD)
+
+**Description**: This dataset includes information about crime incidents in the San Francisco area from `r min(crime$Date_Time)` to `r max(crime$Date_Time)`. It contains `r nrow(crime)` observations and `r ncol(crime)`attributes.
+
+**Attributes**:
+
+|Attribute          |Format               |Description|
+|-------------------|---------------------|-----------|
+|`r names(crime)[1]`|`r class(crime[,1])` | Unique incident number |
+|`r names(crime)[2]`|`r class(crime[,2])` | Type of incident (`r nrow(distinct(crime,Category))` unique values) |
+|`r names(crime)[3]`|`r class(crime[,3])` | Longer incident description |
+|`r names(crime)[4]`|`r class(crime[,4])` | Date and time of incident (YMD HMS) |
+|`r names(crime)[5]`|`r class(crime[,5])` | Incident resolution (if any) |
+|`r names(crime)[6]`|`r class(crime[,6])` | Incident longitude |
+|`r names(crime)[7]`|`r class(crime[,7])` | Incident latitude |
+
+**Dataset**:
+
+```{r view crime data, warning = F, message = F}
+as_tibble(crime)
+```
+
+
+### Road
+
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/83ki-hu3p/rows.csv?accessType=DOWNLOAD)
+
+**Description**: This dataset includes information about street and sidewalk quality around the San Francisco area during the `r paste(levels(road$FY),sep = ", ")` fiscal years. It has `r nrow(road)` observations and `r ncol(road)` attributes. 
+
+**Attributes**: 
+
+|Attribute            |Format                |Description|
+|---------------------|----------------------|-----------|
+|`r names(road)[1]`  |`r class(road[,1])`  | Fiscal year of evaluation |
+|`r names(road)[2]`  |`r class(road[,2])`  | Category of road/sidewalk being evaluated |
+|`r names(road)[3]`  |`r class(road[,3])`  | Number of trash recepticals in area |
+|`r names(road)[4]`  |`r class(road[,4])`  | Number of trees in area |
+|`r names(road)[5]`  |`r class(road[,5])`  | Score Pass (0 = no, 1 = yes) |
+|`r names(road)[6]`  |`r class(road[,6])`  | Litter Pass (0 = no, 1 = yes) |
+|`r names(road)[7]`  |`r class(road[,7])`  | Grime, Leaks, Spills Pass (0 = no, 1 = yes) |
+|`r names(road)[8]`  |`r class(road[,8])`  | Public (DPW) Pass (0 = no, 1 = yes) |
+|`r names(road)[9]`  |`r class(road[,9])`  | Public (nonDPW) |
+|`r names(road)[10]`  |`r class(road[,10])`  | Private Pass (0 = no, 1 = yes) |
+|`r names(road)[11]`  |`r class(road[,11])`  | Sidewalk |
+|`r names(road)[12]`  |`r class(road[,12])`  | Fullness Pass (0 = no, 1 = yes) |
+|`r names(road)[13]`  |`r class(road[,13])`  | Cleanliness of trash receptacles Pass (0 = no, 1 = yes) |
+|`r names(road)[14]`  |`r class(road[,14])`  | Cleanliness around trash receptacles Pass (0 = no, 1 = yes) |
+|`r names(road)[15]`  |`r class(road[,15])`  | Painting Pass (0 = No, 1 = Yes) |
+|`r names(road)[16]`  |`r class(road[,16])`  | Structural integrity & function pass (0 = No, 1 = Yes) |
+|`r names(road)[17]`  |`r class(road[,17])`  | Cleanliness|
+|`r names(road)[18]`  |`r class(road[,18])`  | Tree Appearance|
+|`r names(road)[20]`  |`r class(road[,20])`  | Clearance|
+|`r names(road)[21]`  |`r class(road[,21])`  | Latitude of evaluation site|
+|`r names(road)[22]`  |`r class(road[,22])`  | Longitude of evaluation site|
+|`r names(road)[23]`  |`r class(road[,24])`  | Priority level ("Priority" and "Regular")|
+|`r names(road)[24]`  |`r class(road[,24])`  | Date of evaluation|
+
+
+**Dataset**: 
+
+```{r view road data, message = F, warning = F}
+as_tibble(road)
+```
+
+
+## Initial Exploration
+
+Much of the goal of this project is to provide a platform for self discovery of others through the use of interactive maps and at-a-glance dashboards. Since this functionality is largely incomplete at the moment, a few key summary statistics and figures have been identified to get a basic understanding of the events within the data.
+
+### Bikes
+
+```{r Station locations groupings}
+bikes %>%
+  group_by(start_station_name) %>%
+  summarise(lat = mean(start_station_latitude,na.rm = T),
+            long = mean(start_station_longitude, na.rm = T)) %>%
+  mutate(cluster = ifelse(long < -122.3,1,
+                        ifelse(long > -122.3 & long < -122,2,3))) %>%
+  ggplot(aes(long,lat, col = factor(cluster))) + 
+  geom_point(alpha = 0.3) + 
+  scale_color_brewer(palette = "Set2")
+  coord_map() +
+  theme_classic() 
+```
+
+```{r common routes}
+(top_routes <- (bikes %>%
+  mutate(route = paste(start_station_name, end_station_name, sep = " ~ ")) %>%
+  group_by(route, start_station_latitude, start_station_longitude, 
+           end_station_latitude, end_station_longitude) %>%
+  tally() %>%
+  rename(start_lat = start_station_latitude,
+         start_lon = start_station_longitude,
+         end_lat = end_station_latitude,
+         end_lon = end_station_longitude,
+         obs = n) %>%
+  arrange(desc(obs)))[1:1000,])
+
+  ggmap(get_map(location = "San Francisco",
+                source = "google", 
+                maptype = "roadmap", 
+                color = "bw")) +
+    scale_x_continuous(limits = c(-122.5, -121.8), expand = c(0,0)) +
+    scale_y_continuous(limits = c(37.3,37.9), expand = c(0,0)) +
+    geom_segment(data = top_routes, aes(x = start_lon,
+                      y = start_lat,
+                      xend = end_lon,
+                      yend = end_lat)) 
+```
+
+
+### Crime
+
+When analyzing the crime data, there are three major metrics of importance: when, where, and what. Below we calculate (and summarize in a table) the month with the most crime incidents (*when*) and the most common type of crime (*what*).
+```{r calculate specific values for crime data}
+# Determine most popular crime
+popular_crime <- unique(crime$Category)[which.max(tabulate(match(crime$Category, unique(crime$Category))))]
+
+top_crime_month <- as.data.frame(crime %>% mutate( month = paste(year(Date_Time),month(Date_Time),sep = "-")) %>%  group_by(month) %>% summarise(n_incidents = n()) %>% arrange(desc(n_incidents)))[1,1]
+```
+
+|Metric                                   | Value                                    |
+|----------------------------------------:|:----------------------------------------:|
+|Most popular type of crime | `r popular_crime` |
+|Highest crime month  | `r top_crime_month` |
+
+To answer the *where* question, we plotted an interactive map of all crime events during the month with the most incidents identified above. 
+
+```{r create map of crime during highest activity month, message = F, warning = F}
+leaflet(data = crime %>% filter(Date_Time >= "2017-10-01" & Date_Time < "2017-11-01")) %>% addProviderTiles(providers$MtbMap) %>%
+  addProviderTiles(providers$Stamen.TonerLines,
+    options = providerTileOptions(opacity = 0.35)) %>%
+  addProviderTiles(providers$Stamen.TonerLabels) %>%
+  addMarkers(clusterOptions = markerClusterOptions(), label = ~Category, lat = ~Latitude, lng = ~Longitude)
+```
+
+### Road
+
+```{r}
+ ggmap(get_map(location = "San Francisco",
+                source = "google", 
+                maptype = "roadmap", 
+                color = "bw")) +
+    scale_x_continuous(limits = c(-122.5, -121.8), expand = c(0,0)) +
+    scale_y_continuous(limits = c(37.3,37.9), expand = c(0,0)) + 
+  geom_point(data = road, aes(as.double(Lon), as.double(Lat)))
+```
+
+## Future Plans
+
+In the future detailed, cohesive, and interactive maps will be used in a dashboard style presentation that will allow for user-derived insight into the safest routs for them or bikers in general. The following features are planned for the upcoming release: 
+
+* Filter information by: 
+    +   Date
+    +   Crime Type
+    +   Bike Station
+    +   Location
+    
+* Informative Charts and tables (based on filters) for:
+    +   Ridership over time
+    +   Rider demographics
+    +   Crime characteristics
+
+In addition to the planned features, there are several features that may be developed depending on their ability to add clarity of understanding and available development time. These include
+
+* Geographic spacial clustering analysis
+* Integration of more datasets
+    +   Demographic Information
+    +   Road Quality
+    +   Traffic Stops
+
+## Summary
+
+To recapitulate, the goal of this project is to increase the safety and convenience of bike riders as they traverse the busy streets of San Francisco. With the data already collected and cleaned, we hope to: 
+
+* Derive some sense for where the safest areas to ride a Go-Bike are
+* Identify ridership trends over time
+* Provide spatial analysis of ridership for use by food truck owners
+
+as well as other methods an techniques as time permits. 
+
+In this first submission, great strides have been made to collect, clean, and organize three open datasets. Furthermore, some basic descriptive statistics and visualizations have been derived. In the next submission a deep dive into analysis will take place and valuable insights will be generated. 
+

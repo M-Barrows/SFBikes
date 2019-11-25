@@ -1,0 +1,563 @@
+---
+title: "Safe Pedals"
+author: "San Francisco Bike Share Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    source_code: embed
+    theme: journal
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE)
+```
+
+```{r install and load required packages, message = FALSE, warning = FALSE,results='hide'}
+#Remove all objects in Environment for a clean start
+rm(list = ls())
+
+#Install necessary packages only if they aren't already installed
+list.of.packages <- c("data.table","flexdashboard","lubridate","tidyr","dplyr","stringr","DT","knitr","ggplot2","ggmap","plotly","leaflet","leaflet.extras","bit64", "mapview", "sf", "fossil","scales")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if (length(new.packages)) install.packages(new.packages, repos = "https://cran.rstudio.com")
+
+#load the required packages
+require(data.table)
+require(flexdashboard)
+require(lubridate)
+require(tidyr)
+require(dplyr)
+require(stringr)
+require(DT)
+require(knitr)
+require(ggplot2)
+require(ggmap)
+require(leaflet)
+require(leaflet.extras)
+require(bit64)
+require(mapview)
+require(sf)
+require(fossil)
+#not yet implemented
+require(plotly)
+require(scales)
+
+```
+
+
+
+Home 
+===================================== 
+
+Inputs {.sidebar}
+-------------------------------------
+
+As populations steadily rise, citizens in bustling urban centers like San Francisco face increased difficulty regarding safe and efficient travel. Cars can be relatively efficient (higher speed) and relatively safe but often fall victim to variable traffic patters. Conversely, walking is much safer but also much slower than driving in a car. In this light, many people are turning to bicycles as their preferred mode of transportation as they offer increased route flexibility over cars and increased travel speed when compared to walking. The Ford Go-Bikes in San Francisco offer citizens an affordable and flexible way to make this transition. 
+  
+Unfortunately, cities harbor more transportation perils than simply busy streets. These may include poor road conditions, bike scarcity, dangerous weather conditions, and more. In this report, crime events, and road conditions were tracked along with bike trips in an attempt to identify areas and bike stations within San Francisco that might be more dangerous than others. With this knowledge, users of the Go-Bikes  will be able to identify the safer routes through the city. 
+
+Row 
+-----------------------------------
+
+### San Francisco
+
+```{r}
+leaflet(options = leafletOptions(minZoom = 10, maxZoom = 18)) %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addTiles() %>%
+  setView(lat = 37.78, lng = -122.4194, zoom = 13)
+```
+
+
+
+
+Setup and Raw Data
+=========================================
+
+Column
+-----------------------------------------
+
+### Packages Used:
+
+| Package       | Function                          |
+|--------------:|:---------------------------------:|
+| data.table    | reading data from the web         |
+| flexdashboard | creating dashboard style page     |
+| lubridate     | converting strings to dates       |
+| tidyr         | easy data format cleaning         |
+| dplyr         | data manipulation                 |
+| stringr       | manipulating string fields        |
+| DT            | writing data tables to HTML       |
+| knitr         | compile RMarkdown into HTML       |
+| ggplot2       | powerful plotting function        |
+| ggmap         | Mapping locations from GPS coordinates |
+| leaflet       | interactive geospatial maps       |
+| leaflet.extras| extra functionality for leaflet   | 
+| plotly        | create interactive figures        |
+| bit64         | bit 64 printing of data           |
+| mapview       | synchronize map panels            |
+| sf            | creating geospatial datasets      |
+| fossil        | calculating distance and bearing  |
+
+
+Column {.tabset}
+-----------------------------------------
+
+```{r read in bikes data, message=F, cache = TRUE, results=F}
+bikes <- fread("https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+```
+
+```{r reformat bike attributes}
+
+bikes <- bikes	%>%	
+  mutate(	
+    duration_sec	=	as.integer(duration_sec),		
+    member_birth_year	=	as.integer(member_birth_year),		
+    start_time	=	ymd_hms(start_time),		
+    end_time	=	ymd_hms(end_time),		
+    start_station_latitude	=	as.double(start_station_latitude),		
+    start_station_longitude	=	as.double(start_station_longitude),		
+    end_station_latitude	=	as.double(end_station_latitude),		
+    end_station_longitude	=	as.double(end_station_longitude),		
+    user_type	=	as.factor(user_type),		
+    member_gender	=	as.factor(member_gender)
+  )
+```
+
+```{r read in road data, message = F, cache=TRUE,results=F}
+road_raw <- fread("https://data.sfgov.org/api/views/83ki-hu3p/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+```
+
+```{r reformat road data}
+
+road <- road_raw %>%
+  mutate(
+    FY = as.factor(FY),
+    Priority = as.factor(Priority),
+    Location = str_remove_all(Location, "\\("),
+    Location = str_remove_all(Location, "\\)"),
+    eval_date = dmy_hms(`Evaluation date`)) %>%
+  select(c(4,7,13,29,36,41:52,54:59,61:62)) %>%
+  mutate(PassPercent = rowMeans(.[6:21],na.rm = T)) %>%
+  filter(`Detailed Type` != "Public")
+  
+
+```
+
+```{r read in crime data, message =F, cache=TRUE ,results=F}
+crime <- fread("https://data.sfgov.org/api/views/tmnf-yvry/rows.csv", data.table = F, na.strings = c(""," ","NA","N/A"))
+```
+
+```{r reformat crime attributes}
+crime <- crime %>%
+  unite(Date_Time,Date,Time,sep = " ",remove = T) %>%
+  mutate(
+    Category = as.factor(Category),
+    Date_Time = mdy_hm(Date_Time),
+    IncidntNum = as.character(IncidntNum),
+    Longitude = X,
+    Latitude = Y) %>%
+  select(-c(DayOfWeek, Address,PdDistrict, PdId, Location)) %>%
+  filter(!Category %in% c("NON-CRIMINAL","FORGERY/COUNTERFEITING","TREA","EMBEZZLEMENT","BAD CHECKS","BRIBERY","SECONDARY CODES","EXTORTION","GAMBLING","OTHER OFFENSES","FRAUD","TRESPASS","MISSING PERSON","RUNAWAY","LOITERING","FAMILY OFFENSES"))
+```
+
+```{r prune rows}
+# Find the latest starting date
+latest_start <- max(c(min(bikes$start_time, na.rm = T),
+                      min(crime$Date_Time, na.rm = T)))
+# Find the earliest ending date
+earliest_end <- min(c(max(bikes$end_time, na.rm = T),
+                      max(crime$Date_Time, na.rm = T)))
+# Filter all datasets to the same date range
+bikes <- bikes %>% 
+  filter(start_time >= latest_start & end_time <= earliest_end)
+crime <- crime %>% 
+  filter(Date_Time >= latest_start & Date_Time <= earliest_end)
+road <- road %>% 
+  filter(FY == c("2016-17", "2017-18"))
+# All observations now in the same date range for increased robustness
+```
+
+### Bikes Data
+
+**Source**: [Download from Ford Go-Bikes](https://s3.amazonaws.com/fordgobike-data/2017-fordgobike-tripdata.csv)
+
+**Description**: This dataset includes data on bike trips made on Ford Go-Bikes around the city of San Francisco from `r min(bikes$start_time)` to `r max(bikes$end_time)`. It contains `r nrow(bikes)` observations and `r ncol(bikes)` attributes.
+
+**Attributes**
+
+|Attribute            |Format                |Description|
+|---------------------|----------------------|-----------|
+|`r names(bikes)[1]`  |`r class(bikes[,1])`  | Total time of trip (s)|
+|`r names(bikes)[2]`  |`r class(bikes[,2])`  | Starting time of trip (YMD HMS)|
+|`r names(bikes)[3]`  |`r class(bikes[,3])`  | Ending time of trip (YMD HMS)|
+|`r names(bikes)[4]`  |`r class(bikes[,4])`  | Starting station number|
+|`r names(bikes)[5]`  |`r class(bikes[,5])`  | Starting station name|
+|`r names(bikes)[6]`  |`r class(bikes[,6])`  | Starting station latitude|
+|`r names(bikes)[7]`  |`r class(bikes[,7])`  | Starting station longitude|
+|`r names(bikes)[8]`  |`r class(bikes[,8])`  | Ending station number|
+|`r names(bikes)[9]`  |`r class(bikes[,9])`  | Ending station name|
+|`r names(bikes)[10]` |`r class(bikes[,10])` | Ending station latitude|
+|`r names(bikes)[11]` |`r class(bikes[,11])` | Ending station longitude|
+|`r names(bikes)[12]` |`r class(bikes[,12])` | Bike number|
+|`r names(bikes)[13]` |`r class(bikes[,13])` | User Type ("Customer" or "Subscriber")|
+|`r names(bikes)[14]` |`r class(bikes[,14])` | Birth year of Subscriber |
+|`r names(bikes)[15]` |`r class(bikes[,15])` | Gender of Subscriber ("Male" or "Female")|
+
+**Dataset**:
+
+```{r view bike data, message = F, warning = F}
+datatable(head(bikes,n = 500))
+```
+
+
+### Road Data
+
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/83ki-hu3p/rows.csv?accessType=DOWNLOAD)
+
+**Description**: This dataset includes information about street and sidewalk quality around the San Francisco area during the `r paste(levels(road$FY),sep = ", ")` fiscal years. It has `r nrow(road)` observations and `r ncol(road)` attributes. 
+
+**Attributes**: 
+
+|Attribute            |Format                |Description                |
+|---------------------|----------------|---------------------------|
+|`r names(road)[1]`   |`r class(road[,1])`   | Fiscal year of evaluation |
+|`r names(road)[2]`   |`r class(road[,2])`   | Category of road/sidewalk being evaluated |
+|`r names(road)[3]`   |`r class(road[,3])`   | Unique ID for section of street/sidewalk |
+|`r names(road)[4]`   |`r class(road[,4])`   | Number of trash recepticals in area |
+|`r names(road)[5]`   |`r class(road[,5])`   | Number of trees in area |
+|`r names(road)[6]`   |`r class(road[,6])`   | Score Pass (0 = no, 1 = yes) |
+|`r names(road)[7]`   |`r class(road[,7])`   | Litter Pass (0 = no, 1 = yes) |
+|`r names(road)[8]`   |`r class(road[,8])`   | Grime, Leaks, Spills Pass (0 = no, 1 = yes) |
+|`r names(road)[9]`   |`r class(road[,9])`   | Public (DPW) Pass (0 = no, 1 = yes) |
+|`r names(road)[10]`  |`r class(road[,10])`  | Public (nonDPW) |
+|`r names(road)[11]`  |`r class(road[,11])`  | Private Pass (0 = no, 1 = yes) |
+|`r names(road)[12]`  |`r class(road[,12])`  | Sidewalk |
+|`r names(road)[13]`  |`r class(road[,13])`  | Fullness Pass (0 = no, 1 = yes) |
+|`r names(road)[14]`  |`r class(road[,14])`  | Cleanliness of trash receptacles Pass (0 = no, 1 = yes) |
+|`r names(road)[15]`  |`r class(road[,15])`  | Cleanliness around trash receptacles Pass (0 = no, 1 = yes) |
+|`r names(road)[16]`  |`r class(road[,16])`  | Painting Pass (0 = No, 1 = Yes) |
+|`r names(road)[17]`  |`r class(road[,17])`  | Structural integrity & function pass (0 = No, 1 = Yes) |
+|`r names(road)[18]`  |`r class(road[,18])`  | Cleanliness|
+|`r names(road)[19]`  |`r class(road[,19])`  | Tree Appearance|
+|`r names(road)[20]`  |`r class(road[,20])`  | Clearance|
+|`r names(road)[21]`  |`r class(road[,21])`  | Latitude of evaluation site|
+|`r names(road)[22]`  |`r class(road[,22])`  | Longitude of evaluation site|
+|`r names(road)[23]`  |`r class(road[,23])`  | Priority level ("Priority" and "Regular")|
+|`r names(road)[24]`  |`r class(road[,24])`  | Date of evaluation|
+|`r names(road)[25]`  |`r class(road[,25])`  | Priority level ("Priority" and "Regular")|
+|`r names(road)[26]`  |`r class(road[,26])`  | Percent of above tests passed |
+
+**Dataset**: 
+
+```{r view road data, message = F, warning = F}
+datatable(road)
+```
+
+### Crime Data
+
+**Source**: [Download from data.sf.gov](https://data.sfgov.org/api/views/tmnf-yvry/rows.csv?accessType=DOWNLOAD)
+
+**Description**: This dataset includes information about crime incidents in the San Francisco area from `r min(crime$Date_Time)` to `r max(crime$Date_Time)`. It contains `r nrow(crime)` observations and `r ncol(crime)`attributes.
+
+**Attributes**:
+
+|Attribute          |Format               |Description|
+|-------------------|---------------------|-----------|
+|`r names(crime)[1]`|`r class(crime[,1])` | Unique incident number |
+|`r names(crime)[2]`|`r class(crime[,2])` | Type of incident (`r nrow(distinct(crime,Category))` unique values) |
+|`r names(crime)[3]`|`r class(crime[,3])` | Longer incident description |
+|`r names(crime)[4]`|`r class(crime[,4])` | Date and time of incident (YMD HMS) |
+|`r names(crime)[5]`|`r class(crime[,5])` | Incident resolution (if any) |
+|`r names(crime)[6]`|`r class(crime[,6])` | Incident longitude |
+|`r names(crime)[7]`|`r class(crime[,7])` | Incident latitude |
+
+**Dataset**:
+
+```{r view crime data, warning = F, message = F}
+datatable(head(crime,n=500))
+```
+
+
+Popular Bike Stations
+=========================================
+
+Inputs {.sidebar}
+-----------------------------------------
+
+You'll notice by zooming in and out of the map on the left that the bikes dataset contains information on bike stations in three distinct areas. San Francisco, Berkeley, and San Jose. Since our remaining two datasets only contain information in the San Francisco area, we will be filtering the other two clusters out for the remainder of this analysis.
+
+The upper right figure depicts the direction (N,S,E,W) a rider's ending station was from their beginning station. The length of the line corresponds to distance traveled (in miles).
+
+
+Column
+-----------------------------------------
+
+### Where are bike stations located?
+
+```{r}
+bikes %>%
+  group_by(start_station_name) %>%
+  summarise(lat = mean(start_station_latitude,na.rm = T),
+            long = mean(start_station_longitude, na.rm = T)) %>%
+  mutate(cluster = ifelse(long < -122.3,1,
+                        ifelse(long > -122.3 & long < -122,2,3)))%>%
+  leaflet() %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addMarkers(lat = ~lat, lng = ~long,clusterOptions = markerClusterOptions())
+# bikeCluster <- SharedData$new(bikefull)
+# bscols(
+#   filter_select("BikeCluster","Station Cluster",bikeCluster, ~cluster)
+# )
+bikes_SF <- filter(bikes, start_station_longitude < -122.4 & end_station_longitude < -122.4)
+
+```
+
+
+
+Column
+-----------------------------------------
+
+
+### Which direction do users travel?
+```{r}
+#Calculate the Euclidean distance between two points
+distance <- function(x1,y1,x2,y2){
+     p = pi/180
+     km_m = 0.62137119
+    a = 0.5 - cos((y2 - y1) * p)/2 + cos(y1 * p) * cos(y2 * p) * (1 - cos((x2 - x1) * p)) / 2
+    return (12742 * km_m * asin(sqrt(a))) #2*R*asin...
+}
+#Given Distance and Bearing, calculate the endpoint. Can also supply secondary starting point
+endpoint <- function(dist,bear,val="x",x=0,y=0){
+      x <- x + (dist * cos(bear))
+      y <- y + (dist * sin(bear))
+      if(val == "x"){return(x)
+        }else {return(y)}
+}
+```
+
+
+```{r}
+bikes_SF %>%
+  na.omit() %>%
+  mutate(
+    distance = distance(start_station_longitude, start_station_latitude, end_station_longitude, end_station_latitude),
+    bearing = earth.bear(start_station_longitude, start_station_latitude, end_station_longitude, end_station_latitude),
+    net_end_x = endpoint(distance,bearing,"x"),
+    net_end_y = endpoint(distance,bearing,"y"),
+    net_start_x = 0,
+    net_start_y = 0
+  )%>%
+  ggplot(aes(net_end_x,net_end_y)) + 
+  geom_segment(aes(x=0,y=0,xend=net_end_x,yend=net_end_y),alpha = 0.01)  +
+  xlab("East-West Travel (miles)") + 
+  ylab("North-South Travel (miles)") +
+  geom_hline(yintercept = 0, col = "white") +
+  geom_vline(xintercept = 0, col = "white") +
+  geom_point(aes(x = mean(net_end_x, na.rm = T), y = mean(net_end_y,na.rm = T)),col = "red")
+```
+
+
+
+```{r common routes,eval=FALSE}
+top_routes <- (bikes_SF %>%
+  mutate(route = paste(start_station_name, end_station_name, sep = " ~ ")) %>%
+  group_by(route, start_station_latitude, start_station_longitude, 
+           end_station_latitude, end_station_longitude) %>%
+  tally() %>%
+  rename(start_lat = start_station_latitude,
+         start_lon = start_station_longitude,
+         end_lat = end_station_latitude,
+         end_lon = end_station_longitude,
+         obs = n) %>%
+  arrange(desc(obs)))[1:500,]
+# 
+#   ggmap(get_map(location = "San Francisco",
+#                 source = "osm", 
+#                 maptype = "roadmap", 
+#                 color = "bw",zoom = 14)) +
+#     geom_segment(data = top_routes, aes(x = start_lon,
+#                       y = start_lat,
+#                       xend = end_lon,
+#                       yend = end_lat), alpha = 0.3, 
+#                  col = "blue")
+```
+
+
+Member Demographics
+=========================================
+
+Inputs {.sidebar}
+-----------------------------------------
+This page illustrates the gender breakdown of Go-Bike users. On the left you will see that, in the timeframe of the dataset, the ratio of male to female users is similar between subscribed riders and general customers. This figure also indicates that a large proportion of Go-Bike riders are in fact subscribers. 
+
+On the right, you will notice the change in membership use over time (colored by gender). Despite the sample time of less than one year, we can clearly see hints of seasonality - indicated by high ridership in the summer and fall months with decreased ridership in the winter. 
+
+Column
+-----------------------------------------
+### Gender
+
+```{r}
+bikes_SF %>%
+  filter(!is.na(member_gender),
+         member_gender != '')%>%
+ggplot(aes(user_type, fill = member_gender)) +
+  geom_histogram(stat = "count") +
+  scale_fill_manual(name = "Gender", values = c("firebrick2","dodgerblue1","purple")) + 
+  xlab("User Type") + 
+  scale_y_continuous(name="Persons", labels = comma)
+```
+
+Column
+-----------------------------------------
+### Gender
+
+```{r}
+bikes_SF %>%
+  filter(!is.na(member_gender),
+         member_gender != '')%>%
+  group_by(Date = as.Date(start_time),Gender = member_gender) %>%
+  summarise(Rides = n()) %>%
+ggplot(aes( Date, Rides, color = Gender)) +
+  geom_smooth() + 
+  geom_point(alpha=0.1, aes(fill=Gender))+
+  scale_color_manual(name = "Gender", values =
+                       c("firebrick2","dodgerblue1","purple")) + 
+  xlab("User Type") + 
+  scale_y_continuous(name="Daily Rides", labels = comma)
+```
+
+
+Street Condition
+=========================================
+
+Input {.sidebar}
+-----------------------------------------
+
+**Top Left** 
+
+This figure shows that `Mixed Use` streets have almost double the number of trees as any other category of street.A street with more trees is going to have more shade and therefore provide a more plesent ride in the hot summer months. 
+
+**Bottom Left** 
+
+This figure indicates that residential streets noticeably fewer trash recepticles per area. These may be obstructions to bikers and therefore residential streets would be the obvious best choice for riding. 
+
+**Top Right**
+
+These small multiples seem to suggest that the majority of street types are passing more of the reported tests as time progresses. 
+
+**Bottom Right** 
+
+The points on this map highlight street segments which did not pass more than 75% of the selected tests.These could be isolated as the more perilous street segments to ride along on a Ford Go-Bike.
+
+Column
+-----------------------------------------
+
+### Average number of trees
+```{r}
+road %>%
+  group_by(`Detailed Type`) %>%
+  summarise(meanTrees = mean(`Total # Trees`, na.rm=T)) %>%
+  ggplot(aes(x=reorder(`Detailed Type`, meanTrees),meanTrees)) +
+  geom_histogram(stat = 'identity') + 
+  ylab("Average Trees per Segment") +
+  xlab("Street Type")+
+  coord_flip() 
+```
+
+### Average number of trash recepticles
+```{r}
+road %>%
+  group_by(`Detailed Type`) %>%
+  summarise(meanTrash = mean(`Total # Trash Receptacles`, na.rm=T)) %>%
+  ggplot(aes(x=reorder(`Detailed Type`, -meanTrash),meanTrash)) +
+  geom_histogram(stat = 'identity') + 
+  ylab("Average Trash Recepticles per Segment") + 
+  xlab("Street Type") +
+  coord_flip()
+```
+
+Column
+-----------------------------------------
+
+### Streets are getting cleaner over time
+```{r}
+road %>%
+  group_by(`CNN (Route ID)`, Latitude, Longitude, FY, `Detailed Type`) %>%
+  summarise(PassPerc = mean(PassPercent, na.rm=T)) %>%
+  ggplot(aes(FY, PassPerc)) +
+  geom_jitter() + 
+  facet_wrap(~`Detailed Type`) +
+  xlab("Fiscal Year") +
+  ylab("Percent of Tests Passed") + 
+  scale_y_continuous(labels = scales::percent)
+```
+
+
+### Streets that pass fewer than 75% of tests
+
+```{r}
+road %>%
+  group_by(`CNN (Route ID)`) %>%
+  filter(mean(PassPercent, na.rm=T) < 0.75) %>%
+  select(lng = Longitude, lat = Latitude,PassPercent) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(label = ~as.character(paste0(round(PassPercent,2)*100,"%")),radius = 3)
+```
+
+Crime
+=========================================
+
+```{r}
+topCrimes <- crime %>%
+  group_by(Category) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total)) %>%
+  top_n(4)
+
+for(i in 1:3){
+  assign(paste0("topCrimeMap",i),crime %>%filter(Category == topCrimes$Category[i]) %>%
+           leaflet() %>%
+           addTiles() %>%
+           addHeatmap(blur = 13,radius = 7) %>%
+           setView(lat = 37.76, lng = -122.4194, zoom = 12))
+} 
+```
+
+
+Column
+-----------------------------------------
+
+### `r topCrimes$Category[1]`
+
+```{r}
+topCrimeMap1
+```
+
+### `r topCrimes$Category[2]`
+
+```{r}
+topCrimeMap2
+```
+
+Column
+-----------------------------------------
+### `r topCrimes$Category[3]`
+
+```{r}
+topCrimeMap3
+```
+
+### Popular Bike Stations
+
+```{r}
+bikes_SF %>%
+  leaflet() %>%
+  addTiles() %>%
+  addHeatmap(lat = ~start_station_latitude, lng = ~start_station_longitude, blur = 15, radius = 10) %>%
+  setView(lat = 37.76, lng = -122.4194, zoom = 12)
+```
+
+
+

@@ -1,6 +1,0 @@
-name: "SFBikes"
-navbar:
-  title: "SFBikes"
-  left:
-    - text: "Home"
-      href: storyboard.html
